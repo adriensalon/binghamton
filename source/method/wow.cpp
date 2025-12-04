@@ -84,23 +84,29 @@ namespace {
 
 } // namespace
 
-double embed_wow(
+bool embed_wow(
     const std::vector<std::uint8_t>& rgb,
     const std::size_t width,
     const std::size_t height,
     const std::array<std::uint8_t, 32> /*steg_key*/,
     const std::vector<std::uint8_t>& payload_bits,
-    std::vector<std::uint8_t>& rgb_embedded)
+    std::vector<std::uint8_t>& rgb_embedded,
+    double& cost_embedded)
 {
     if (rgb.size() != 3 * width * height) {
         throw std::runtime_error("embed_wow: rgb.size() must be equal to 3 * width * height");
     }
 
     const std::size_t pixels_count = width * height;
+    constexpr std::size_t LENGTH_BITS = 32; // first 32 pixels store payload bit length (raw LSB)
+
+    if (pixels_count <= LENGTH_BITS) {
+        throw std::runtime_error("embed_wow: image too small to store length prefix");
+    }
 
     // 1. Extract Y from RGB
     std::vector<std::uint8_t> Y;
-    encode_y(rgb, Y); // from ycbcr.cpp :contentReference[oaicite:6]{index=6}
+    encode_y(rgb, Y); // from ycbcr.cpp
 
     if (Y.size() != pixels_count) {
         throw std::runtime_error("embed_wow: encode_y produced unexpected Y size");
@@ -108,7 +114,11 @@ double embed_wow(
 
     // 2. Build cover symbols = LSBs of Y
     std::vector<std::uint8_t> cover_symbols;
-    encode_lsb(Y, cover_symbols); // from lsb.cpp :contentReference[oaicite:7]{index=7}
+    encode_lsb(Y, cover_symbols); // from lsb.cpp
+
+    if (cover_symbols.size() != pixels_count) {
+        throw std::runtime_error("embed_wow: encode_lsb produced unexpected symbol count");
+    }
 
     // 3. Compute WOW-like rho on Y
     std::vector<float> Rx, Ry, Rd;
@@ -138,64 +148,152 @@ double embed_wow(
         }
     }
 
-    // TODO: use steg_key to permute indices before STC (for extra security)
-    // For now, we feed cover_symbols in raster order.
+    // --- NEW: reserve first 32 pixels to store payload length in bits (raw) ---
 
-    // 5. Run STC on the LSBs with distortion price
-    std::vector<std::uint8_t> stego_symbols;
+    const std::size_t available_for_payload = pixels_count - LENGTH_BITS;
+
+    if (payload_bits.size() == 0) {
+        throw std::runtime_error("embed_wow: payload_bits is empty");
+    }
+    if (payload_bits.size() > available_for_payload) {
+        throw std::runtime_error("embed_wow: payload does not fit in image (after length prefix)");
+    }
+
+    // Build cover + price for the STC part (skip first LENGTH_BITS pixels)
+    std::vector<std::uint8_t> cover_symbols_stc(
+        cover_symbols.begin() + static_cast<std::ptrdiff_t>(LENGTH_BITS),
+        cover_symbols.end());
+
+    std::vector<std::uint8_t> price_stc(
+        price.begin() + static_cast<std::ptrdiff_t>(LENGTH_BITS),
+        price.end());
+
+    if (cover_symbols_stc.size() != available_for_payload || price_stc.size() != available_for_payload) {
+        throw std::runtime_error("embed_wow: internal STC buffers have wrong size");
+    }
+
+    // 5. Run STC on the LSBs with distortion price (for payload_bits only)
+    std::vector<std::uint8_t> stego_symbols_stc;
     constexpr std::uint32_t constraint_height = 3; // placeholder for real STC
-    double cost = encode_stc(
-        cover_symbols,
+    cost_embedded = encode_stc(
+        cover_symbols_stc,
         payload_bits,
-        price,
+        price_stc,
         constraint_height,
-        stego_symbols); // from stc.cpp :contentReference[oaicite:8]{index=8}
+        stego_symbols_stc); // from stc.cpp
 
-    if (stego_symbols.size() != pixels_count) {
+    if (stego_symbols_stc.size() != available_for_payload) {
         throw std::runtime_error("embed_wow: encode_stc returned wrong symbol count");
     }
 
-    // 6. Apply stego LSBs back into Y
+    // 6. Assemble full stego_symbols = [length_bits (raw)] + [STC-coded payload bits]
+    std::vector<std::uint8_t> stego_symbols(pixels_count);
+
+    // 6.1 Encode payload_bits.size() (in bits) as 32-bit big-endian, one bit per pixel LSB
+    std::size_t payload_bit_len = payload_bits.size();
+    std::array<std::uint8_t, LENGTH_BITS> length_bits {};
+    for (std::size_t i = 0; i < LENGTH_BITS; ++i) {
+        std::size_t shift = (LENGTH_BITS - 1) - i; // MSB first
+        length_bits[i] = static_cast<std::uint8_t>((payload_bit_len >> shift) & 0x1u);
+    }
+
+    // First LENGTH_BITS pixels: raw length bits
+    for (std::size_t i = 0; i < LENGTH_BITS; ++i) {
+        stego_symbols[i] = length_bits[i]; // encode_lsb/decode_lsb treat these as bits (0/1)
+    }
+
+    // Remaining pixels: STC stego symbols
+    for (std::size_t i = 0; i < available_for_payload; ++i) {
+        stego_symbols[LENGTH_BITS + i] = stego_symbols_stc[i];
+    }
+
+    // 7. Apply stego LSBs back into Y
     std::vector<std::uint8_t> Y_stego;
     decode_lsb(Y, stego_symbols, Y_stego); // from lsb.cpp
 
-    // 7. Rebuild RGB with new Y and original chroma
-    decode_y(rgb, Y_stego, rgb_embedded); // from ycbcr.cpp
+    
 
-    return cost;
+    // 8. Rebuild RGB with new Y and original chroma
+    return decode_y(rgb, Y_stego, rgb_embedded); // from ycbcr.cpp
+
 }
 
 void extract_wow(
     const std::vector<std::uint8_t>& rgb_stego,
     const std::size_t width,
     const std::size_t height,
-    const std::array<std::uint8_t, 32> /*steg_key*/,
+    const std::array<std::uint8_t, 32> steganography_key,
     const std::uint32_t constraint_height,
-    const std::size_t payload_bit_count,
+    const std::size_t max_payload_bit_count,
     std::vector<std::uint8_t>& payload_bits_out)
 {
     if (rgb_stego.size() != 3 * width * height) {
         throw std::runtime_error("extract_wow: rgb_stego.size() must be 3 * width * height");
     }
-    if (payload_bit_count > width * height) {
-        throw std::runtime_error("extract_wow: payload_bit_count > number of pixels");
+
+    const std::size_t pixels_count = width * height;
+    constexpr std::size_t LENGTH_BITS = 32;
+
+    if (pixels_count <= LENGTH_BITS) {
+        throw std::runtime_error("extract_wow: image too small to contain length prefix");
     }
-    if (payload_bit_count == 0) {
+    if (max_payload_bit_count > width * height) {
+        throw std::runtime_error("extract_wow: max_payload_bit_count > number of pixels");
+    }
+    if (max_payload_bit_count == 0) {
+        payload_bits_out.clear();
         return;
     }
 
-    const std::size_t pixels_count = width * height;
+    const std::size_t available_for_payload = pixels_count - LENGTH_BITS;
 
+    // 1. Extract Y from stego RGB
     std::vector<std::uint8_t> Y_stego;
     encode_y(rgb_stego, Y_stego);
 
+    if (Y_stego.size() != pixels_count) {
+        throw std::runtime_error("extract_wow: encode_y produced unexpected Y size");
+    }
+
+    // 2. Extract stego LSB symbols
     std::vector<std::uint8_t> stego_symbols;
     encode_lsb(Y_stego, stego_symbols);
 
-    // 3. (Future) if you permuted indices during embed using steg_key,
-    //    you MUST undo the permutation here before calling decode_stc.
+    if (stego_symbols.size() != pixels_count) {
+        throw std::runtime_error("extract_wow: encode_lsb produced unexpected symbol count");
+    }
 
-    decode_stc(stego_symbols, constraint_height, payload_bit_count, payload_bits_out);
+    // --- NEW: read 32-bit big-endian payload length from first LENGTH_BITS pixels ---
+    std::size_t payload_bit_len = 0;
+    for (std::size_t i = 0; i < LENGTH_BITS; ++i) {
+        payload_bit_len = (payload_bit_len << 1) | (stego_symbols[i] & 0x1u);
+    }
+
+    if (payload_bit_len == 0) {
+        // No payload
+        payload_bits_out.clear();
+        return;
+    }
+
+    if (payload_bit_len > max_payload_bit_count) {
+        throw std::runtime_error("extract_wow: encoded payload length exceeds user cap");
+    }
+    if (payload_bit_len > available_for_payload) {
+        throw std::runtime_error("extract_wow: encoded payload length does not fit in image");
+    }
+
+    // 3. Build STC symbols vector from remaining pixels
+    std::vector<std::uint8_t> stc_symbols(
+        stego_symbols.begin() + static_cast<std::ptrdiff_t>(LENGTH_BITS),
+        stego_symbols.end());
+
+    if (stc_symbols.size() != available_for_payload) {
+        throw std::runtime_error("extract_wow: internal STC buffer has wrong size");
+    }
+
+    // 4. Decode with STC using the exact payload_bit_len we read from the header
+    payload_bits_out.clear();
+    decode_stc(stc_symbols, constraint_height, payload_bit_len, payload_bits_out);
 }
 
 } // namespace binghamton
