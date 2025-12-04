@@ -1,9 +1,8 @@
 #include "gtest_env.hpp"
 #include <binghamton/method/wow.hpp>
 
-struct gtest_wow : public gtest_env { };
-
-TEST_F(gtest_wow, correctness)
+namespace binghamton {
+TEST_F(binghamton, wow_roundtrip)
 {
     std::vector<std::uint8_t> _rgb;
     std::size_t _width, _height;
@@ -21,8 +20,9 @@ TEST_F(gtest_wow, correctness)
     const std::filesystem::path _current_dir = std::filesystem::temp_directory_path() / "binghamton";
     std::filesystem::create_directories(_current_dir);
 
+    double _cost;
     std::vector<std::uint8_t> _rgb_embedded;
-    const double _cost = binghamton::embed_wow(_rgb, _width, _height, _steganography_key, _payload, _rgb_embedded);
+    embed_wow(_rgb, _width, _height, _steganography_key, _payload, _rgb_embedded, _cost);
     save_image(_current_dir / "output.png", _rgb_embedded, _width, _height);
 
     std::vector<std::uint8_t> _rgb_verify;
@@ -30,12 +30,7 @@ TEST_F(gtest_wow, correctness)
     load_image(_current_dir / "output.png", _rgb_verify, _width_verify, _height_verify);
 
     std::vector<std::uint8_t> _payload_extracted;
-    binghamton::extract_wow(_rgb_verify, _width_verify, _height_verify, _steganography_key, 3, _payload.size(), _payload_extracted);
+    extract_wow(_rgb_verify, _width_verify, _height_verify, _steganography_key, 3, _payload.size(), _payload_extracted);
     EXPECT_EQ(_payload, _payload_extracted);
 }
-
-int main(int argc, char** argv)
-{
-    testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
 }

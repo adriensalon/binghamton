@@ -6,7 +6,8 @@
 
 #include <gtest/gtest.h>
 
-struct gtest_env : public testing::Test {
+namespace binghamton {
+struct binghamton : public testing::Test {
 
     static void load_default_image(
         std::vector<std::uint8_t>& rgb,
@@ -25,3 +26,4 @@ struct gtest_env : public testing::Test {
         const std::size_t& width,
         const std::size_t& height);
 };
+}

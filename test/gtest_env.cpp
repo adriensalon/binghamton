@@ -4,7 +4,9 @@
 #include "gtest_env.hpp"
 #include "gtest_texture.hpp"
 
-void gtest_env::load_default_image(std::vector<std::uint8_t>& rgb, std::size_t& width, std::size_t& height)
+namespace binghamton {
+
+void binghamton::load_default_image(std::vector<std::uint8_t>& rgb, std::size_t& width, std::size_t& height)
 {
     int _width, _height, _channels;
     unsigned char* _rgb = stbi_load_from_memory(gtest_texture_png, gtest_texture_png_len, &_width, &_height, &_channels, 3);
@@ -22,7 +24,7 @@ void gtest_env::load_default_image(std::vector<std::uint8_t>& rgb, std::size_t& 
     stbi_image_free(_rgb);
 }
 
-void gtest_env::load_image(const std::filesystem::path& path, std::vector<std::uint8_t>& rgb, std::size_t& width, std::size_t& height)
+void binghamton::load_image(const std::filesystem::path& path, std::vector<std::uint8_t>& rgb, std::size_t& width, std::size_t& height)
 {
     int _width, _height, _channels;
     const std::string _path = path.string();
@@ -41,8 +43,15 @@ void gtest_env::load_image(const std::filesystem::path& path, std::vector<std::u
     stbi_image_free(_rgb);
 }
 
-void gtest_env::save_image(const std::filesystem::path& path, const std::vector<std::uint8_t>& rgb, const std::size_t& width, const std::size_t& height)
+void binghamton::save_image(const std::filesystem::path& path, const std::vector<std::uint8_t>& rgb, const std::size_t& width, const std::size_t& height)
 {
     const std::string _path = path.string();
     stbi_write_png(_path.c_str(), static_cast<int>(width), static_cast<int>(height), 3, rgb.data(), static_cast<int>(width) * 3);
+}
+}
+
+int main(int argc, char** argv)
+{
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }

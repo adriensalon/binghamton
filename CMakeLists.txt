@@ -1,6 +1,6 @@
 project(binghamton)
 
-option(BINGHAMTON_BUILD_TEST "Builds gtest executables for all methods" ON)
+option(BINGHAMTON_BUILD_TEST "Builds a gtest executable" ON)
 
 file(GLOB_RECURSE binghamton_source "source/*.cpp")
 add_library(binghamton STATIC ${binghamton_source})
@@ -11,11 +11,8 @@ if(BINGHAMTON_BUILD_TEST)
     set(gtest_force_shared_crt ON)
     add_subdirectory("external/gtest")
     add_subdirectory("external/stb")
-    target_sources(binghamton PUBLIC "test/gtest_env.cpp")
-    target_link_libraries(binghamton PUBLIC GTest::gtest_main stb)
-
-    # WOW
-    add_executable(binghamton_gtest_wow "test/gtest_wow.cpp")
-    set_target_properties(binghamton_gtest_wow PROPERTIES CXX_STANDARD 17)
-    target_link_libraries(binghamton_gtest_wow PRIVATE binghamton)
+    file(GLOB_RECURSE binghamton_gtest_source "test/*.cpp")
+    add_executable(binghamton_gtest ${binghamton_gtest_source})
+    set_target_properties(binghamton_gtest PROPERTIES CXX_STANDARD 17)
+    target_link_libraries(binghamton_gtest PRIVATE binghamton GTest::gtest_main stb)
 endif()
