@@ -22,7 +22,7 @@ TEST_F(binghamton, wow_roundtrip)
 
     double _cost;
     std::vector<std::uint8_t> _rgb_embedded;
-    embed_wow(_rgb, _width, _height, _steganography_key, _payload, _rgb_embedded, _cost);
+    embed_wow(_rgb, _width, _height, _steganography_key, 3, _payload, _rgb_embedded, _cost);
     save_image(_current_dir / "output.png", _rgb_embedded, _width, _height);
 
     std::vector<std::uint8_t> _rgb_verify;

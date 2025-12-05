@@ -11,6 +11,7 @@ namespace binghamton {
         const std::size_t width,
         const std::size_t height,
         const std::array<std::uint8_t, 32> steg_key,
+        const std::uint32_t constraint_height,
         const std::vector<std::uint8_t>& payload_bits,
         std::vector<std::uint8_t>& rgb_embedded,
         double& cost_embedded);
